@@ -1,7 +1,7 @@
 # %%
 import pandas as pd
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
 # Configure logging
@@ -21,10 +21,14 @@ logger.info(f"Sample data loaded: {len(df_sample)} rows")
 
 # %%
 # Function to process a single chunk
-def process_chunk(chunk_data):
+def process_chunk(chunk_dict):
     """Process a chunk and return filtered results"""
-    chunk_num, chunk = chunk_data
+    chunk_num = chunk_dict['chunk_num']
+    chunk_data = chunk_dict['data']
     cols = ['code', 'product_name', 'brands_lc', 'nutriscore_score']
+
+    # Reconstruct the dataframe from the serialized data
+    chunk = pd.DataFrame(chunk_data)
 
     filtered_chunk = chunk[chunk['nutriscore_score'] > 40]
 
@@ -32,29 +36,34 @@ def process_chunk(chunk_data):
     if len(filtered_chunk) > 0:
         filtered_chunk = filtered_chunk.loc[:, filtered_chunk.columns.intersection(cols)]
 
-    return chunk_num, len(chunk), len(filtered_chunk), filtered_chunk
+    return chunk_num, len(chunk), len(filtered_chunk), filtered_chunk.to_dict('records')
 
 
 # Do through all the data and find products where nutriscore_score is higher than 40
 logger.info("Starting to process all data chunks in parallel to find products with nutriscore_score > 40")
 
-# Smaller chunk size for better parallelization
+# Larger chunk size for better CPU utilization (less overhead)
 chunk_size = 50_000
-num_workers = cpu_count() * 2  # Use more threads since it's I/O bound
-logger.info(f"Using {num_workers} threads with chunk size of {chunk_size}")
+num_workers = cpu_count()
+logger.info(f"Using {num_workers} processes with chunk size of {chunk_size}")
 
-# Process chunks on-the-fly using ThreadPoolExecutor
+# Process chunks on-the-fly using ProcessPoolExecutor
 df_high_nutriscore = pd.DataFrame()
 chunk_count = 0
 total_filtered = 0
 
-with ThreadPoolExecutor(max_workers=num_workers) as executor:
+with ProcessPoolExecutor(max_workers=num_workers) as executor:
     # Submit chunks as they're read (on-the-fly)
     futures = {}
 
     for chunk in pd.read_json(file_path, lines=True, chunksize=chunk_size):
         chunk_count += 1
-        future = executor.submit(process_chunk, (chunk_count, chunk))
+        # Serialize chunk data to avoid pickle issues
+        chunk_dict = {
+            'chunk_num': chunk_count,
+            'data': chunk.to_dict('records')
+        }
+        future = executor.submit(process_chunk, chunk_dict)
         futures[future] = chunk_count
         logger.info(f"Submitted chunk {chunk_count} for processing")
 
@@ -62,12 +71,13 @@ with ThreadPoolExecutor(max_workers=num_workers) as executor:
 
     # Collect results as they complete
     for future in as_completed(futures):
-        chunk_num, chunk_size_processed, filtered_count, filtered_chunk = future.result()
+        chunk_num, chunk_size_processed, filtered_count, filtered_data = future.result()
         logger.info(
             f"Completed chunk {chunk_num}: {chunk_size_processed} rows, found {filtered_count} products with nutriscore_score > 40")
 
-        if len(filtered_chunk) > 0:
-            df_high_nutriscore = pd.concat([df_high_nutriscore, filtered_chunk], ignore_index=True)
+        if filtered_count > 0:
+            filtered_df = pd.DataFrame(filtered_data)
+            df_high_nutriscore = pd.concat([df_high_nutriscore, filtered_df], ignore_index=True)
 
         total_filtered += filtered_count
 
