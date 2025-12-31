@@ -1,7 +1,7 @@
 # %%
 import pandas as pd
 import logging
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
 # Configure logging
@@ -40,15 +40,15 @@ logger.info("Starting to process all data chunks in parallel to find products wi
 
 # Smaller chunk size for better parallelization
 chunk_size = 50_000
-num_processes = cpu_count()
-logger.info(f"Using {num_processes} processes with chunk size of {chunk_size}")
+num_workers = cpu_count() * 2  # Use more threads since it's I/O bound
+logger.info(f"Using {num_workers} threads with chunk size of {chunk_size}")
 
-# Process chunks on-the-fly using ProcessPoolExecutor
+# Process chunks on-the-fly using ThreadPoolExecutor
 df_high_nutriscore = pd.DataFrame()
 chunk_count = 0
 total_filtered = 0
 
-with ProcessPoolExecutor(max_workers=num_processes) as executor:
+with ThreadPoolExecutor(max_workers=num_workers) as executor:
     # Submit chunks as they're read (on-the-fly)
     futures = {}
 
