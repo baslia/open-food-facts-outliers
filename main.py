@@ -22,7 +22,7 @@ def main():
 
     logger.info(f"Sequentially scanning chunks to find products with nutriscore_score > {threshold}")
 
-    chunk_size = 200_000
+    chunk_size = 50_000
     filtered_parts = []
     total_filtered = 0
     chunk_count = 0
@@ -54,7 +54,9 @@ def main():
             logger.info(f"Concatenating {len(filtered_parts)} filtered parts after {chunk_count} chunks")
             if filtered_parts:
                 df_high_nutriscore = pd.concat(filtered_parts, ignore_index=True)
-       
+                df_high_nutriscore['url'] = "https://world.openfoodfacts.org/product/" + df_high_nutriscore[
+                    'code'].zfill(13)
+
                 logger.info(f"Filtered parts concatenated; current total rows: {len(df_high_nutriscore)}")
                 df_high_nutriscore.to_excel("results/high_nutriscore_products_intermediate.xlsx", index=False)
 
@@ -71,6 +73,8 @@ def main():
     logger.info("Generating product URLs")
     df_high_nutriscore['url'] = "https://world.openfoodfacts.org/product/" + df_high_nutriscore['code'].zfill(13)
     logger.info(f"URLs generated successfully for {len(df_high_nutriscore)} products")
+    df_high_nutriscore.to_excel(
+        "results/high_nutriscore_products_total.xlsx", index=False)
 
 
 if __name__ == "__main__":
